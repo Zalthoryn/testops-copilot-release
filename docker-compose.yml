@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # Redis - для хранения состояния джобов
+  redis:
+    image: redis:7-alpine
+    container_name: testops-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - testops-network
+    restart: unless-stopped
+
+  # Backend - FastAPI приложение
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: testops-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://foundation-models.api.cloud.ru/v1}
+      - LLM_MODEL=${LLM_MODEL:-openai/gpt-oss-120b}
+      - ENVIRONMENT=${ENVIRONMENT}
+      - REDIS_URL=redis://redis:6379
+      - STORAGE_PATH=/app/storage
+      - COMPUTE_API_URL=${COMPUTE_API_URL:-https://compute.api.cloud.ru}
+      - COMPUTE_TOKEN=${COMPUTE_TOKEN}
+      - GITLAB_TOKEN=${GITLAB_TOKEN}
+    volumes:
+      - ./backend:/app
+      - backend_storage:/app/storage
+      - backend_logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - testops-network
+    restart: unless-stopped
+
+  # Frontend - React приложение
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: testops-frontend
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - testops-network
+    restart: unless-stopped
+
+networks:
+  testops-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local
+  backend_storage:
+    driver: local
+  backend_logs:
+    driver: local
